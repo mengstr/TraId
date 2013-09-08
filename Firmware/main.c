@@ -67,12 +67,14 @@ __CONFIG(
 
 #define RES_NPN		0x10		// Less code to check single bit than using modulus
 #define RES_PNP		0x20
-#define RES_NCH		0x10
-#define RES_PCH		0x20
+#define RES_NCH		0x40
+#define RES_PCH		0x80
 
 #define LED_OFF		0			// For SetLed()
 #define LED_NPN		7			
 #define LED_PNP		8
+#define LED_NCH		7			
+#define LED_PCH		8
 #define LED_PWR		9
 
 #define ONE1K 		A2			// Pins where the 1K resistors are connected to
@@ -313,14 +315,13 @@ void SetMode(uint8_t mode) {
 uint8_t Measure(void) {
 	uint8_t	low1,low2,low3;
 	uint8_t high1,high2,high3;
-	uint8_t base, emitter, collector;
+	uint8_t lows,highs;
 	uint8_t result;
 	uint8_t delta1,delta2;
 
 	result=RES_NONE;
 	low1=low2=low3=0;
 	high1=high2=high3=0;
-	base=emitter=collector=0;
 
 	for (uint8_t i=1; i<7; i++) {
 		CLRWDT();
@@ -333,48 +334,55 @@ uint8_t Measure(void) {
 		if (adc3>245) high3++;
 	}
 	CLRWDT();
+	
+	lows=low1+low2+low3;
+	highs=high1+high2+high3;
+	
+	if ((lows==6) && (highs==6)) { // NFET Signature
+		result=RES_NCH;
+		// Handle this in the most simplistic way according to the measurements
+		// of a 2N7000 NFET. This is probably not correct and will possibly not work
+		// in all cases.
+		if (low1==1) {
+			if (low2==2) result+=RES_GDS;
+			if (low2==3) result+=RES_DGS;
+		}
+		if (low1==2) {
+			if (low2==1) result+=RES_SDG;
+			if (low2==3) result+=RES_SGD;
+		}
+		if (low1==3) {
+			if (low2==1) result+=RES_DSG;
+			if (low2==2) result+=RES_GSD;
+		}
+	}	
 
-	if ((low1+low2+low3==5) && (high1+high2+high3==4)) { // NPN Signature
+	if ((lows==5) && (highs==4)) { // NPN Signature
 		result=RES_NPN;
 		if (low1==3) {
-			base=1;
 			delta1=SetAll(ILH, HII); 	// Test BEC
 			delta2=SetAll(IHL, HII);	// Test BCE
 			if (delta1<delta2) {
-				emitter=2;
-				collector=3;
 				result+=RES_BEC;
 			} else {
-				emitter=3;
-				collector=2;
 				result+=RES_BCE;
 			}
 		}
 		if (low2==3) {
-			base=2;
 			delta1=SetAll(LIH, IHI);	// Test EBC
 			delta2=SetAll(HIL, IHI);	// Test CBE
 			if (delta1<delta2) {
-				emitter=1;
-				collector=3;
 				result+=RES_EBC;
 			} else {
-				emitter=3;
-				collector=1;
 				result+=RES_CBE;
 			}
 		}
 		if (low3==3) {
-			base=3;
 			delta1=SetAll(LHI, IIH);	// Test ECB
 			delta2=SetAll(HLI, IIH);	// Test CEB
 			if (delta1<delta2) {
-				emitter=1;
-				collector=2;
 				result+=RES_ECB;
 			} else {
-				emitter=2;
-				collector=1;
 				result+=RES_CEB;
 			}
 		}
@@ -382,48 +390,32 @@ uint8_t Measure(void) {
 	}
 
 	//MPSA92 PNP  1=E 2=B 3=C
-	if ((low1+low2+low3==4) && (high1+high2+high3==5)) { // PNP Signature
+	if ((lows==4) && (highs==5)) { // PNP Signature
 		result=RES_PNP;
-		base=0;
 		if (high1==3) {
-			base=1;
 			delta1=SetAll(ILH, LII); 	// Test BEC
 			delta2=SetAll(IHL, LII);	// Test BCE
 			if (delta1>delta2) {
-				emitter=2;
-				collector=3;
 				result+=RES_BEC;
 			} else {
-				emitter=3;
-				collector=2;
 				result+=RES_BCE;
 			}
 		}
 		if (high2==3) {
-			base=2;
 			delta1=SetAll(LIH, ILI);	// Test EBC
 			delta2=SetAll(HIL, ILI);	// Test CBE
 			if (delta1>delta2) {
-				emitter=1;
-				collector=3;
 				result+=RES_EBC;
 			} else {
-				emitter=3;
-				collector=1;
 				result+=RES_CBE;
 			}
 		}
 		if (high3==3) {
-			base=3;
 			delta1=SetAll(LHI, IIL);	// Test ECB
 			delta2=SetAll(HLI, IIL);	// Test CEB
 			if (delta1>delta2) {
-				emitter=1;
-				collector=2;
 				result+=RES_ECB;
 			} else {
-				emitter=2;
-				collector=1;
 				result+=RES_CEB;
 			}
 		}
@@ -465,7 +457,7 @@ uint8_t Measure(void) {
 void Shutdown(void) {
 	WatchDogOff();	// Turn of watchdog so it won't wake us up again
 	
-	SetLed(0);		// Flash the firmware version number before shutdown
+	SetLed(0);		// Flash the firmware version number on the LEDs before shutdown
 	__delay_ms(300);
 	SetLed(VERSION_MAJ);	
 	__delay_ms(100);
@@ -501,11 +493,6 @@ void Shutdown(void) {
 void main(void) {
 	uint8_t result;
 	uint8_t timeout;
-#ifdef DEBUG_HILOCNT
-	uint8_t	low1,low2,low3;
-	uint8_t high1,high2,high3;
-	uint8_t i,j;
-#endif
 
 	OSCCON=0xFF;	//16 MHz
 	ANSELA=0;
@@ -514,20 +501,14 @@ void main(void) {
 	
 #ifdef _1LCD	
 	LCDInit();
-	LCDData('T');
-	LCDData('r');
-	LCDData('a');
-	LCDData('I');
-	LCDData('d');
-	for (uint8_t i=0;i<100; i++) __delay_ms(10);
 	LCDCommand(0x01);	
 #endif
 
 
-
-
-
 #ifdef DEBUG_HILOCNT
+	uint8_t	low1,low2,low3;
+	uint8_t high1,high2,high3;
+	uint8_t i,j;
 	for (;;) {
 		low1=low2=low3=0;
 		high1=high2=high3=0;
@@ -590,16 +571,22 @@ void main(void) {
 		result=Measure();
 		CLRWDT();
 
-		// If o transistor is found just briefly flash the power-on LED
-		if (result==RES_NONE) SetLed(LED_PWR);
-		else {
+		// If no transistor is found just briefly flash the power-on LED
+		if (result==RES_NONE) {
+			SetLed(LED_PWR);
+		} else {
 			// We have identified a transisor type and pinout, so flash the
-			// relevant LEDs and also reset the timeout
+			// right LEDs and also reset the timeout
 			timeout=TIMEOUT;
 			if (result&RES_NPN) SetLed(LED_NPN);
 			if (result&RES_PNP) SetLed(LED_PNP);
+			if (result&RES_NCH) SetLed(LED_NCH);
 			__delay_ms(5);
 			SetLed(result&0x0f);
+			if (result&RES_NCH) {
+				__delay_ms(5);
+				SetLed(LED_PWR);
+			}	
 		}
 		__delay_ms(5);
 		SetLed(LED_OFF);
@@ -608,6 +595,9 @@ void main(void) {
 		// that will only be awakened by pressing the Reset/Power button
 		if (--timeout==0) Shutdown();
 
+		// Sleep for a few hundred mS to conserve power and then wake up by the watchdog
+		// and make a new measurement
+		CLRWDT();
 		SLEEP();
 	}
 
