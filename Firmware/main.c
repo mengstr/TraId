@@ -1,22 +1,29 @@
+/*
+		===============================================
+		TraId - A transistor type & polarity identifier
 
-//				+-------v--------+
-//				|1 dd      Vss 14|
-//		  LedG1 |2 RA5     RA0 13| 300K TP1  R5  (AN0)
-//		  LedG2 |3 RA4     RA1 12| 300K TP2  R7  (AN1)
-//		  Reset |4 RA3     RA2 11|   1K TP1  R6  (AN2)
-//		  LedG4 |5 RC5     RC0 10|   1K TP2  R8  (AN4)
-//		  LedG3 |6 RC4     RC1  9| 300K TP3  R9  (AN5)
-//		  Spare |7 RC3     RC2  8|   1K TP3  R10 (AN6)
-//				+----------------+
-//
-
+		Copyright (C) 2013  Mats Engstrom
+		===============================================
+		
+		This program is free software; you can redistribute it and/or
+		modify it under the terms of the GNU General Public License
+		as published by the Free Software Foundation; either version 2
+		of the License, or (at your option) any later version.
+		
+		This program is distributed in the hope that it will be useful,
+		but WITHOUT ANY WARRANTY; without even the implied warranty of
+		MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+		GNU General Public License for more details.
+		
+		You should have received a copy of the GNU General Public License
+		along with this program; if not, write to the Free Software
+		Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+*/
 
 #include <htc.h> 
 #include <stdint.h>        	// For uint8_t definition
 //#include "1LCD.h"			// Uncomment this to enable LCD debugging
-
-//#define DEBUG_HILOCNT
-
+//#define DEBUG_HILOCNT		// Uncomment this to flash the results from initial scan
 
 __CONFIG(
 	FOSC_INTOSC&
@@ -32,6 +39,10 @@ __CONFIG(
 	BORV_19 & 
 	LVP_OFF);  
 
+
+#define VERSION_MAJ	1			// Firmware version number to be flashed at shutdown
+#define VERSION_MIN 1
+
 #define _XTAL_FREQ 	16000000	// Use the the 16 MHz cpu clock
 #define TIMEOUT 	4*30		// Autosleep after 30 seconds 
 
@@ -40,14 +51,24 @@ __CONFIG(
 #define HIGH 		0x02
 
 #define RES_NONE	0			// #0..6 are results from Measure() added with RES_NPN/PNP
+
 #define RES_EBC		1			// #1..6 are also used directly for SetLed()
 #define RES_ECB		2
 #define RES_BCE		3
 #define RES_BEC		4
 #define RES_CBE		5
 #define RES_CEB		6
+#define RES_SGD		1			
+#define RES_SDG		2
+#define RES_GDS		3
+#define RES_GSD		4
+#define RES_DGS		5
+#define RES_DSG		6
+
 #define RES_NPN		0x10		// Less code to check single bit than using modulus
 #define RES_PNP		0x20
+#define RES_NCH		0x10
+#define RES_PCH		0x20
 
 #define LED_OFF		0			// For SetLed()
 #define LED_NPN		7			
@@ -97,9 +118,6 @@ __CONFIG(
 #define LII ((LOW<<0) |(IN<<2)  |(IN<<4))	// 300 K base for PNP orientation tests
 #define ILI ((IN<<0)  |(LOW<<2) |(IN<<4))
 #define IIL ((IN<<0)  |(IN<<2)  |(LOW<<4))
-
-
-
 
 uint8_t adc1,adc2,adc3;	// Global variables for the ADC readings
 
@@ -446,6 +464,25 @@ uint8_t Measure(void) {
 //
 void Shutdown(void) {
 	WatchDogOff();	// Turn of watchdog so it won't wake us up again
+	
+	SetLed(0);		// Flash the firmware version number before shutdown
+	__delay_ms(300);
+	SetLed(VERSION_MAJ);	
+	__delay_ms(100);
+	SetLed(0);	
+	__delay_ms(100);
+	SetLed(VERSION_MAJ);	
+	__delay_ms(100);
+	SetLed(0);	
+	__delay_ms(300);
+	SetLed(VERSION_MIN);	
+	__delay_ms(100);
+	SetLed(0);	
+	__delay_ms(100);
+	SetLed(VERSION_MIN);	
+	__delay_ms(100);
+	SetLed(0);	
+
 //	VREGPM-1;	// Low power sleep mode (slow)
 	ANSELA=0;	// Set all ports as digital
 	ANSELC=0;
@@ -578,10 +615,25 @@ void main(void) {
 }
 /*
 
+
+				PIC16LF1503
+				+-------v--------+
+				|1 Vdd     Vss 14|
+		  LedG1 |2 RA5     RA0 13| 300K TP1  R5  (AN0)
+		  LedG2 |3 RA4     RA1 12| 300K TP2  R7  (AN1)
+		  Reset |4 RA3     RA2 11|   1K TP1  R6  (AN2)
+		  LedG4 |5 RC5     RC0 10|   1K TP2  R8  (AN4)
+		  LedG3 |6 RC4     RC1  9| 300K TP3  R9  (AN5)
+		  Spare |7 RC3     RC2  8|   1K TP3  R10 (AN6)
+				+----------------+
+
+
+
+
 RED=1 BLACK=2 BROWN=3
 
-BC547 FRONT Collector-Base-Emitter
-=================================
+NPN BC547 FRONT Collector-Base-Emitter
+======================================
 
 BRK 311 022 Base=1  bec
 KRB 311 022 Base=1  bce
@@ -591,8 +643,8 @@ KBR 113 220 Base=3  ecb
 RBK 113 220 Base=3  ceb
 
 
-BC557 FRONT Collector-Base-Emitter
-=================================
+PNP BC557 FRONT Collector-Base-Emitter
+======================================
 BRK                 bce
 KRB                 bec
 RKB                 ebc
@@ -600,4 +652,13 @@ BKR                 cbe
 KBR                 ceb
 RBK                 ecb
 
+
+NFET 2N7000 FRONT Source-Gate-Drain (6/6)
+=================================
+RKB 231 132 sgd
+BKR 132 231 dgs
+KRB 321 312 gsd
+BRK 312 321 dsg
+RBK 213 123 sdg
+KBR 123 213 gds
 */
